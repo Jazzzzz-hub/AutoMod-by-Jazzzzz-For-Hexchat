@@ -514,6 +514,25 @@ def cmd_chan(word, word_eol, userdata):
         hexchat.prnt(f"Added protection: {ch}")
     save_protected_channels()
     return hexchat.EAT_ALL
+# --- Remove Protected Channel Command ---
+def cmd_unchan(word, word_eol, userdata):
+    """Usage: /AMUNCHAN #channel — Remove a protected channel"""
+    if len(word) < 2:
+        hexchat.prnt("[AutoMod] Usage: /AMUNCHAN #channel")
+        return hexchat.EAT_ALL
+
+    channel = word[1].lower()
+
+    if channel in protected_channels:
+        protected_channels.remove(channel)
+        save_protected_channels()
+        hexchat.prnt(f"[AutoMod] Removed protection: {channel}")
+    else:
+        hexchat.prnt(f"[AutoMod] Channel not in protection list: {channel}")
+
+    return hexchat.EAT_ALL
+
+hexchat.hook_command("AMUNCHAN", cmd_unchan, help="/AMUNCHAN #channel — Remove channel from AutoMod protection")
 
 def cmd_set(word, word_eol, userdata):
     if len(word) < 2:
@@ -577,6 +596,7 @@ def cmd_help(word, word_eol, userdata):
         "/AMADD          Add rule: /AMADD <nick|word> pattern::message::minutes?",
         "/AMDEL          Delete rule: /AMDEL <nick|word> pattern",
         "/AMCHAN         Toggle protection for a channel",
+        "/AMUNCHAN       Toggle remove protection for a channel",
         "/AMSET UNBAN_MINUTES <n>   Set auto-unban minutes",
         "/AMSET KICKMSG <text>      Set default kick message",
         "/AMSET BANMSG <text>       Set default ban message",
@@ -599,6 +619,7 @@ def show_text_menu(word=None, word_eol=None, userdata=None):
         "7) Default Ban     -> /AMSET DEFAULTBAN <minutes>",
         "8) Reload Rules    -> /AUTORELOAD",
         "9) Quick Help      -> /AMHELP",
+        "10) Del Chan Prot  -> /AMUNCHAN #channel",
         "───────────────────────────────────────",
     ]
     for l in lines:
@@ -618,6 +639,7 @@ hexchat.hook_command("AMLIST", cmd_list)
 hexchat.hook_command("AMADD", cmd_add)
 hexchat.hook_command("AMDEL", cmd_del)
 hexchat.hook_command("AMCHAN", cmd_chan)
+hexchat.hook_command("AMUNCHAN", cmd_chan)
 hexchat.hook_command("AMSET", cmd_set)
 hexchat.hook_command("AMGUI", cmd_gui)
 hexchat.hook_command("AMHELP", cmd_help)
