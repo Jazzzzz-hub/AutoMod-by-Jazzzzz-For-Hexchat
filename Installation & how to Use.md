@@ -90,7 +90,20 @@ Example:
 ```
 /AMCHAN #testroom
 ```
+---
 
+▶️ **Unprotect a Channel**
+
+```
+/AMUNCHAN #channel
+```
+
+Remove the specified channel to AutoMod’s protection list.
+Example:
+
+```
+/AMUNCHAN #testroom
+```
 ---
 
 ▶️ **View Current Settings**
