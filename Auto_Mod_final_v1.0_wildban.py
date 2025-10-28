@@ -12,10 +12,34 @@ import os
 import re
 import time
 import json
+import random
 
 __module_name__ = "AutoMod by Jazzzzz"
 __module_version__ = "1.0 Powered by Jazzzzz"
 __module_description__ = "Auto kick/ban with wildcards, reliable QUOTE KICK, per-channel protection"
+
+# --- Auto-create random message files if missing ---
+def ensure_random_msg_files():
+    base_configdir = hexchat.get_info("configdir") or os.path.expanduser("~/.config/hexchat")
+    addons_dir = os.path.join(base_configdir, "addons")
+    files = [
+        os.path.join(addons_dir, "nick_kickmsgs.txt"),
+        os.path.join(addons_dir, "word_kickmsgs.txt"),
+        os.path.join(addons_dir, "flood_kickmsgs.txt"),
+    ]
+    for fp in files:
+        if not os.path.exists(fp):
+            try:
+                with open(fp, "w", encoding="utf-8") as f:
+                    f.write("# One message per line — randomly chosen each time.\n")
+                    f.write("# Example lines:\n")
+                    f.write("# Watch your nick!\n# Language not allowed!\n# Calm down, spammer!\n")
+                hexchat.prnt(f"[AutoMod] Created {os.path.basename(fp)}")
+            except Exception as e:
+                hexchat.prnt(f"[AutoMod] Error creating {fp}: {e}")
+ensure_random_msg_files()
+
+import random
 
 # -------------------------
 # Paths & files
@@ -32,10 +56,75 @@ SETTINGS_FILE = os.path.join(BASE_DIR, "automod_settings.json")
 README_PATH = os.path.join(BASE_DIR, "AutoMod_README.txt")
 LOG_FILE = os.path.join(BASE_DIR, "automod_log.txt")
 
+# Random message files (new)
+NICK_MSG_FILE = os.path.join(BASE_DIR, "nick_kickmsgs.txt")
+WORD_MSG_FILE = os.path.join(BASE_DIR, "word_kickmsgs.txt")
+FLOOD_MSG_FILE = os.path.join(BASE_DIR, "flood_kickmsgs.txt")
+
 # -------------------------
 # Behavior flags
 # -------------------------
-RESET_CONFIGS = True  # reset/regenerate config files (you asked earlier)
+# Set this to False so settings persist
+RESET_CONFIGS = False
+
+# -------------------------
+# Helper: pick random kick message
+# -------------------------
+def get_random_msg(filepath, default_msg=""):
+    """Pick a random non-empty, non-comment line from file; fallback to default."""
+    try:
+        if not os.path.exists(filepath):
+            return default_msg
+        with open(filepath, "r", encoding="utf-8") as f:
+            lines = [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
+        if not lines:
+            return default_msg
+        return random.choice(lines)
+    except Exception as e:
+        log(f"Error reading random message from {filepath}: {e}")
+        return default_msg
+
+# -------------------------
+# Rule file helpers
+# -------------------------
+def ensure_files_exist(reset=False):
+    """Ensure all config and message files exist."""
+    files = [
+        BAD_NICKS_FILE,
+        BAD_WORDS_FILE,
+        PROTECTED_FILE,
+        NICK_MSG_FILE,
+        WORD_MSG_FILE,
+        FLOOD_MSG_FILE,
+    ]
+    if reset:
+        for fp in files:
+            try:
+                if os.path.exists(fp):
+                    os.remove(fp)
+            except Exception:
+                pass
+
+    for fp in files:
+        if not os.path.exists(fp):
+            try:
+                with open(fp, "w", encoding="utf-8") as f:
+                    if fp == BAD_NICKS_FILE:
+                        f.write("# bad_nicks.txt - pattern :: message :: minutes(optional)\n")
+                        f.write("# Use *wildcards* for new rules, e.g. *rambo* :: msg :: 60\n")
+                    elif fp == BAD_WORDS_FILE:
+                        f.write("# bad_words.txt - pattern :: message :: minutes(optional)\n")
+                        f.write("# Use *wildcards* for new rules, e.g. *badword* :: msg :: 60\n")
+                    elif fp == PROTECTED_FILE:
+                        f.write("# protected_channels.txt - one channel per line (lowercase)\n")
+                    elif fp in (NICK_MSG_FILE, WORD_MSG_FILE, FLOOD_MSG_FILE):
+                        f.write("# One message per line — randomly chosen each time.\n")
+                        f.write("# Example lines:\n")
+                        f.write("# Watch your nick!\n")
+                        f.write("# Language not allowed!\n")
+                        f.write("# Calm down, spammer!\n")
+            except Exception as e:
+                hexchat.prnt(f"[AutoMod] Error creating {fp}: {e}")
 
 # -------------------------
 # Timers and defaults
@@ -195,8 +284,9 @@ def load_rules_from_file(filename):
                 if not parsed:
                     continue
                 pat, msg, dur = parsed
-                # Existing rules on disk: do NOT auto-convert plain strings to wildcard
-                cre, is_wild = pattern_to_regex(pat, is_new_rule=False)
+                # Detect wildcard automatically if pattern contains '*'
+                is_wildcard = "*" in pat
+                cre, is_wild = pattern_to_regex(pat, is_new_rule=is_wildcard)
                 if cre is None:
                     log(f"Invalid pattern skipped: {pat}")
                     continue
@@ -218,6 +308,7 @@ def save_rules_to_file(rules, filename):
         log(f"Error saving rules: {e}")
 
 def load_protected_channels(reset=False):
+    """Load protected channels from file into memory."""
     global protected_channels
     protected_channels = set()
     if reset and os.path.exists(PROTECTED_FILE):
@@ -230,18 +321,24 @@ def load_protected_channels(reset=False):
             with open(PROTECTED_FILE, "r", encoding="utf-8") as fh:
                 for line in fh:
                     s = line.strip()
-                    if s and not s.startswith("#"):
+                    # allow lines that start with '#' (channel names)
+                    if s and not s.startswith("# "):  # skip commented lines only
                         protected_channels.add(s.lower())
+            log(f"Loaded {len(protected_channels)} protected channels: {', '.join(protected_channels) or '<none>'}")
         except Exception as e:
             log(f"Error loading protected channels: {e}")
+    else:
+        log("No protected_channels.txt found — creating a new one.")
+        save_protected_channels()
 
 def save_protected_channels():
     """Save protected channels to PROTECTED_FILE."""
     try:
         with open(PROTECTED_FILE, "w", encoding="utf-8") as f:
+            f.write("# protected_channels.txt - one channel per line (lowercase)\n")
             for chan in sorted(protected_channels):
-                f.write(chan + "\n")
-        log("Protected channels saved.")
+                f.write(f"{chan}\n")
+        log(f"Saved {len(protected_channels)} protected channels.")
     except Exception as e:
         log(f"Error saving protected channels: {e}")
 
@@ -395,7 +492,7 @@ def on_join(word, word_eol, userdata):
                         continue
                 # if core is empty (pattern was just '*' or similar), do not skip
             # Not skipped — enforce rule
-            reason = msg or settings.get("BANMSG", "") or "AutoMod: Prohibited nickname"
+            reason = msg or get_random_msg(NICK_MSG_FILE, settings.get("BANMSG", "") or "AutoMod: Prohibited nickname")
             apply_ban_and_kick(channel, nick, reason,
                                dur if (dur is not None) else settings.get("UNBAN_MINUTES", DEFAULTS["UNBAN_MINUTES"]))
             return hexchat.EAT_ALL
@@ -417,14 +514,14 @@ def on_message(word, word_eol, userdata):
         return hexchat.EAT_NONE
 
     if record_message_for_flood(channel, nick):
-        reason = settings.get("KICKMSG", "") or settings.get("BANMSG", "") or "Flooding the channel"
+        reason = get_random_msg(FLOOD_MSG_FILE, settings.get("KICKMSG", "") or settings.get("BANMSG", "") or "Flooding the channel")
         apply_ban_and_kick(channel, nick, reason, settings.get("UNBAN_MINUTES", DEFAULTS["UNBAN_MINUTES"]))
         flood_records.pop((channel.lower(), nick.lower()), None)
         return hexchat.EAT_ALL
 
     for pat, (cre, msg, dur, is_wild) in bad_word_rules.items():
         if cre.search(message):
-            reason = msg or settings.get("BANMSG", "") or "AutoMod: Prohibited language"
+            reason = msg or get_random_msg(WORD_MSG_FILE, settings.get("BANMSG", "") or "AutoMod: Prohibited language")
             apply_ban_and_kick(channel, nick, reason, dur if dur is not None else settings.get("UNBAN_MINUTES", DEFAULTS["UNBAN_MINUTES"]))
             return hexchat.EAT_ALL
 
