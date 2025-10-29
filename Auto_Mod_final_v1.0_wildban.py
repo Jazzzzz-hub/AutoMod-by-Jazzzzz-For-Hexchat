@@ -1,5 +1,5 @@
 # ============================================================
-#  AutoMod by Jazzzzz - Final v1.0
+#  AutoMod by Jazzzzz - Final v1.0 (patched)
 #  - Wildcard support for new rules (*word*)
 #  - Direct QUOTE KICK for reliable kicks on Flatpak/Bahamut
 #  - Per-channel protection, configurable unban time/messages
@@ -148,7 +148,6 @@ settings = {}
 bad_nick_rules = {}   # pattern -> (compiled, message, duration_minutes, is_wildcard)
 bad_word_rules = {}
 protected_channels = set()
-active_bans = {}      # (chan_lower, mask) -> expiry_ts
 flood_records = {}    # (chan_lower, nick_lower) -> [timestamps]
 whitelist_nicks = set(["ChanServ", "NickServ"])
 
@@ -380,6 +379,7 @@ def apply_ban_and_kick(channel, nick, reason, duration_minutes):
     mask = ban_mask_for_nick(nick)
     cmd_ban = f"MODE {channel} +b {mask}"
     cmd_kick_quote = f"QUOTE KICK {channel} {nick} :{reason}"
+
     try:
         ctx = hexchat.find_context(channel=channel)
     except Exception:
@@ -394,6 +394,10 @@ def apply_ban_and_kick(channel, nick, reason, duration_minutes):
             ctx.command(cmd_ban)
         else:
             hexchat.command(cmd_ban)
+
+        # ✅ Log inside the function (mask is in scope here)
+        log(f"Set ban {mask} in {channel} — reason: {reason}")
+
     except Exception as e:
         log(f"Error issuing ban: {e}")
 
@@ -405,37 +409,6 @@ def apply_ban_and_kick(channel, nick, reason, duration_minutes):
             log(f"Failed QUOTE KICK {nick} in {channel}: {e}")
 
     schedule_once(KICK_DELAY_MS, do_kick)
-
-    expiry = time.time() + (duration_minutes * 60 if duration_minutes else settings.get("UNBAN_MINUTES", DEFAULTS["UNBAN_MINUTES"]) * 60)
-    active_bans[(channel.lower(), mask)] = expiry
-    log(f"Set ban {mask} in {channel} (expires in {int((expiry-time.time())/60)} min) — reason: {reason}")
-
-def unban_expired(userdata=None):
-    now = time.time()
-    removed = []
-    for (chan, mask), expiry in list(active_bans.items()):
-        if now >= expiry:
-            cmd = f"MODE {chan} -b {mask}"
-            try:
-                ctx = hexchat.find_context(channel=chan)
-            except Exception:
-                ctx = None
-            try:
-                if ctx:
-                    try:
-                        ctx.set()
-                    except Exception:
-                        pass
-                    ctx.command(cmd)
-                else:
-                    hexchat.command(cmd)
-                log(f"Unbanned {mask} from {chan}")
-            except Exception as e:
-                log(f"Error unbanning {mask} from {chan}: {e}")
-            removed.append((chan, mask))
-    for key in removed:
-        active_bans.pop(key, None)
-    return True
 
 # -------------------------
 # Flood detection
@@ -734,7 +707,6 @@ def show_text_menu(word=None, word_eol=None, userdata=None):
 # Init & hooks
 # -------------------------
 load_all(reset=RESET_CONFIGS)
-hexchat.hook_timer(UNBAN_CHECK_MS, unban_expired)
 hexchat.hook_print("Join", on_join)
 hexchat.hook_print("Channel Message", on_message)
 
