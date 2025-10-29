@@ -1,5 +1,5 @@
 # ============================================================
-#  AutoMod by Jazzzzz - Final v1.0 (patched)
+#  AutoMod by Jazzzzz - Final v1.0
 #  - Wildcard support for new rules (*word*)
 #  - Direct QUOTE KICK for reliable kicks on Flatpak/Bahamut
 #  - Per-channel protection, configurable unban time/messages
@@ -159,16 +159,11 @@ def timestamp():
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
 def log(msg):
-    line = f"{timestamp()} - {msg}"
-    try:
-        hexchat.prnt(f"[AutoMod] {msg}")
-    except Exception:
-        pass
-    try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:
-        pass
+    ctx = hexchat.find_context(server=None, channel="AutoMod")
+    if not ctx:
+        hexchat.command("QUERY AutoMod")  # opens a tab but does not DM a user
+        ctx = hexchat.find_context(channel="AutoMod")
+    ctx.prnt(msg)
 
 def save_settings():
     try:
@@ -367,6 +362,18 @@ def schedule_once(ms, func):
 # Ban/Kick/Unban with QUOTE KICK
 # -------------------------
 def ban_mask_for_nick(nick):
+    user = hexchat.get_list("users")
+    for u in user:
+        if u.nick.lower() == nick.lower():
+            # u.host contains: ident@hostname
+            # So split into ident and host:  ident, host = u.host.split("@", 1)
+            try:
+                ident, host = u.host.split("@", 1)
+                return f"*!*@{host}"     # host ban instead of nick ban
+            except:
+                pass
+
+    # Fallback if host is not found
     return f"{nick}!*@*"
 
 def apply_ban_and_kick(channel, nick, reason, duration_minutes):
