@@ -376,35 +376,25 @@ def ban_mask_for_nick(nick):
     return f"{nick}!*@*"
 
 def apply_ban_and_kick(channel, nick, reason, duration_minutes):
+
     mask = ban_mask_for_nick(nick)
+
+    ban_reason = "AutoMod: violation"
+    kick_reason = reason  # ✅ random is ONLY for kick
+
     cmd_ban = f"MODE {channel} +b {mask}"
-    cmd_kick_quote = f"QUOTE KICK {channel} {nick} :{reason}"
+    cmd_kick = f"QUOTE KICK {channel} {nick} :{kick_reason}"
 
     try:
-        ctx = hexchat.find_context(channel=channel)
-    except Exception:
-        ctx = None
-
-    try:
-        if ctx:
-            try:
-                ctx.set()
-            except Exception:
-                pass
-            ctx.command(cmd_ban)
-        else:
-            hexchat.command(cmd_ban)
-
-        # ✅ Log inside the function (mask is in scope here)
-        log(f"Set ban {mask} in {channel} — reason: {reason}")
-
+        hexchat.command(cmd_ban)
+        log(f"Set ban {mask} in {channel} — reason: {ban_reason}")
     except Exception as e:
         log(f"Error issuing ban: {e}")
 
     def do_kick():
         try:
-            hexchat.command(cmd_kick_quote)
-            log(f"Sent QUOTE KICK {channel} {nick} :{reason}")
+            hexchat.command(cmd_kick)  # ✅ FIXED NAME
+            log(f"Sent QUOTE KICK {channel} {nick} :{kick_reason}")
         except Exception as e:
             log(f"Failed QUOTE KICK {nick} in {channel}: {e}")
 
