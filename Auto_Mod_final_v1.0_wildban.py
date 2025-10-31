@@ -376,25 +376,35 @@ def ban_mask_for_nick(nick):
     return f"{nick}!*@*"
 
 def apply_ban_and_kick(channel, nick, reason, duration_minutes):
-
     mask = ban_mask_for_nick(nick)
-
-    ban_reason = "AutoMod: violation"
-    kick_reason = reason  # ✅ random is ONLY for kick
-
     cmd_ban = f"MODE {channel} +b {mask}"
-    cmd_kick = f"QUOTE KICK {channel} {nick} :{kick_reason}"
+    cmd_kick_quote = f"QUOTE KICK {channel} {nick} :{reason}"
 
     try:
-        hexchat.command(cmd_ban)
-        log(f"Set ban {mask} in {channel} — reason: {ban_reason}")
+        ctx = hexchat.find_context(channel=channel)
+    except Exception:
+        ctx = None
+
+    try:
+        if ctx:
+            try:
+                ctx.set()
+            except Exception:
+                pass
+            ctx.command(cmd_ban)
+        else:
+            hexchat.command(cmd_ban)
+
+        # ✅ Log inside the function (mask is in scope here)
+        log(f"Set ban {mask} in {channel} — reason: {reason}")
+
     except Exception as e:
         log(f"Error issuing ban: {e}")
 
     def do_kick():
         try:
-            hexchat.command(cmd_kick)  # ✅ FIXED NAME
-            log(f"Sent QUOTE KICK {channel} {nick} :{kick_reason}")
+            hexchat.command(cmd_kick_quote)
+            log(f"Sent QUOTE KICK {channel} {nick} :{reason}")
         except Exception as e:
             log(f"Failed QUOTE KICK {nick} in {channel}: {e}")
 
@@ -475,27 +485,53 @@ def on_join(word, word_eol, userdata):
 def on_message(word, word_eol, userdata):
     if len(word) < 2:
         return hexchat.EAT_NONE
+
     nick = word[0]
     message = word_eol[1] if len(word_eol) > 1 else word[1]
     channel = hexchat.get_info("channel")
+
     if not is_protected(channel):
         return hexchat.EAT_NONE
+
     if is_whitelisted(nick):
         return hexchat.EAT_NONE
 
+    # --- FLOOD DETECTION ---
     if record_message_for_flood(channel, nick):
-        reason = get_random_msg(FLOOD_MSG_FILE, settings.get("KICKMSG", "") or settings.get("BANMSG", "") or "Flooding the channel")
-        apply_ban_and_kick(channel, nick, reason, settings.get("UNBAN_MINUTES", DEFAULTS["UNBAN_MINUTES"]))
+        reason = get_random_msg(
+            FLOOD_MSG_FILE,
+            settings.get("KICKMSG", "") or settings.get("BANMSG", "") or "Flooding the channel"
+        )
+        apply_ban_and_kick(
+            channel,
+            nick,
+            reason,
+            settings.get("UNBAN_MINUTES", DEFAULTS["UNBAN_MINUTES"])
+        )
         flood_records.pop((channel.lower(), nick.lower()), None)
-        return hexchat.EAT_ALL
 
+        # ✅ Allow message to appear in channel
+        return hexchat.EAT_NONE
+
+    # --- BAD WORD DETECTION ---
     for pat, (cre, msg, dur, is_wild) in bad_word_rules.items():
         if cre.search(message):
-            reason = msg or get_random_msg(WORD_MSG_FILE, settings.get("BANMSG", "") or "AutoMod: Prohibited language")
-            apply_ban_and_kick(channel, nick, reason, dur if dur is not None else settings.get("UNBAN_MINUTES", DEFAULTS["UNBAN_MINUTES"]))
-            return hexchat.EAT_ALL
+            reason = msg or get_random_msg(
+                WORD_MSG_FILE,
+                settings.get("BANMSG", "") or "AutoMod: Prohibited language"
+            )
+            apply_ban_and_kick(
+                channel,
+                nick,
+                reason,
+                dur if dur is not None else settings.get("UNBAN_MINUTES", DEFAULTS["UNBAN_MINUTES"])
+            )
+
+            # ✅ Allow message to appear in channel
+            return hexchat.EAT_NONE
 
     return hexchat.EAT_NONE
+
 
 # -------------------------
 # Commands
